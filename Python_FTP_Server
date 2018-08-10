@@ -1,0 +1,289 @@
+import sys
+import shutil
+import os
+import socket
+
+RETR_count = 0
+USER_executed = False
+PASS_executed = False
+new_PORT = False
+Final_Port = 0
+Final_Host = None
+
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server_socket.bind(("", int(sys.argv[1])))
+#print("socket bound to"+ sys.argv[1])
+server_socket.listen(1) # Allow only one connection at a time
+#print("listening")
+
+
+while True:
+        (connect_server, addr) = server_socket.accept()
+        sys.stdout.write("220 COMP 431 FTP server ready.\r\n")
+        connect_server.send("220 COMP 431 FTP server ready.\r\n".encode())
+
+        while True:
+            command = connect_server.recv(1024).decode()
+            sys.stdout.write(command)
+
+            # Checks for the USER command, the first line make sure the command is on its own
+            if "USER " in command.upper():
+                splt_line = command.split(" ", 1)
+                username = splt_line[1]
+                error = 0
+                if len(username) <= 2:
+                    error = error + 1
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                # Loop checks for correct ascii characters
+                for x in username:
+                    c_num = ord(x)
+                    if c_num > 127:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                        error = error + 1
+                        break
+                # checks for CRLF characters in the string
+                if error == 0 and ord(username[-2]) == 13 and ord(username[-1]) == 10:
+                    USER_executed = True
+                    sys.stdout.write("331 Guest access OK, send password.\r\n")
+                    connect_server.send("331 Guest access OK, send password.\r\n".encode())
+                elif error == 0:
+                    if ord(username[-2]) != 13 or ord(username[-1]) != 10:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+
+            # Checks for the correct PASS command
+            elif "PASS " in command.upper() and USER_executed == True:
+                splt_line = command.split(" ", 1)
+                password = splt_line[1]
+                error = 0
+                if len(password) <= 2:
+                    error = error + 1
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                # Checks for correct ascii characters in the password
+                for x in password:
+                    c_num = ord(x)
+                    if c_num > 127:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                        error = error + 1
+                        break
+                # Checks for CRLF
+                if error == 0 and ord(password[-2]) == 13 and ord(password[-1]) == 10:
+                    PASS_executed = True
+                    sys.stdout.write("230 Guest login OK.\r\n")
+                    connect_server.send("230 Guest login OK.\r\n".encode())
+                elif error == 0:
+                    if ord(password[-2]) != 13 or ord(password[-1]) != 10:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+            elif "PASS " in command.upper() and USER_executed == False:
+                sys.stdout.write("503 Bad sequence of commands.\r\n")
+                connect_server.send("503 Bad sequence of commands.\r\n".encode())
+
+                # Checks for TYPE command
+            elif "TYPE " in command.upper() and USER_executed == True and PASS_executed == True:
+                splt_line = command.split(" ", 1)
+                type_code = splt_line[1]
+                # Checks for correct type-code and CRLF
+                if ord(type_code[0]) == 65 or ord(type_code[0]) == 73:
+                    if ord(type_code[-2]) == 13 and ord(type_code[-1]) == 10:
+                        if ord(type_code[0]) == 65:
+                            sys.stdout.write("200 Type set to A.\r\n")
+                            connect_server.send("200 Type set to A.\r\n".encode())
+                        elif ord(type_code[0]) == 73:
+                            sys.stdout.write("200 Type set to I.\r\n")
+                            connect_server.send("200 Type set to I.\r\n".encode())
+                    else:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                else:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+            # Check sequence flags
+            elif "TYPE " in command.upper():
+                if USER_executed == False or PASS_executed == False:
+                    sys.stdout.write("530 Not logged in.\r\n")
+                    connect_server.send("530 Not logged in.\r\n".encode())
+                elif USER_executed == True and PASS_executed == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+                    connect_server.send("503 Bad sequence of commands.\r\n".encode())
+
+                    # Checks for SYST command
+            elif "SYST" in command.upper() and USER_executed == True and PASS_executed == True:
+                length = len(command)
+                # The lengthof the line can only be 6 characters so if more there are unwanted characters.
+                if length > 6:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                # Checks CRLF
+                elif ord(command[-2]) == 13 and ord(command[-1]) == 10:
+                    sys.stdout.write("215 UNIX Type: L8.\r\n")
+                    connect_server.send("215 UNIX Type: L8.\r\n".encode())
+                else:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+            # Check sequence flags
+            elif "SYST" in command.upper():
+                if USER_executed == False and PASS_executed == False:
+                    sys.stdout.write("530 Not logged in.\r\n")
+                    connect_server.send("530 Not logged in.\r\n".encode())
+                elif USER_executed == True and PASS_executed == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+                    connect_server.send("503 Bad sequence of commands.\r\n".encode())
+
+            elif "NOOP" in command.upper():
+                length = len(command)
+                # Length of line can only be 6 so if there is more there are unwanted characters
+                if length > 6:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                # Check CRLF
+                elif ord(command[-2]) == 13 and ord(command[-1]) == 10:
+                    sys.stdout.write("200 Command OK.\r\n")
+                else:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+            # Checks sequence flags
+            elif "NOOP" in command.upper():
+                if USER_executed == False or PASS_executed == False:
+                    sys.stdout.write("530 Not logged in.\r\n")
+                elif USER_executed == True and PASS_executed == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+
+                # Check QUIT command
+            elif "QUIT" in command.upper():
+                length = len(command)
+                # Check length if varies than unwanted characters
+                if length > 6:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in paramer.\r\n".encode())
+                elif ord(command[-2]) != 13 and ord(command[-1]) != 10:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                else:
+                    sys.stdout.write("221 Goodbye.\r\n")
+                    connect_server.send("221 Goodbye.\r\n".encode())
+                    connect_server.close()
+                    break
+
+            elif "PORT " in command.upper() and USER_executed == True and PASS_executed == True:
+                splt_line = command.split(" ", 1)
+                host_port = splt_line[1]
+                host_port_replace = host_port.replace(",", ".")
+                splt_host = host_port_replace.split(".")
+                if ord(host_port[-2]) != 13 or ord(host_port[-1]) != 10:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                if len(splt_host) == 6:
+                    error = 0
+                    for i in range(len(splt_host)):
+                        num = int(splt_host[i])
+                        if num < 0 or num > 255:
+                            error = 1
+                            sys.stdout.write("501 Syntax error in parameter.\r\n")
+                            connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                            break
+                    # Converts last two numbers to decimal
+                    if error == 0:
+                        Math_num = splt_host[4]
+                        math_Num = splt_host[5]
+                        port_num = (int(Math_num) * 256) + int(math_Num)
+                        host_address = splt_host[0] + "." + splt_host[1] + "." + splt_host[2] + "." + splt_host[3]
+                        full_address = host_address + "," + str(port_num)
+                        sys.stdout.write("200 Port command successful" + " " + "(" + full_address + ").\r\n")
+                        connect_server.send(("200 Port command successful" + " " + "(" + full_address + ").\r\n").encode())
+                        new_PORT = True
+                        Final_Port = port_num
+                        Final_Host = host_address
+                else:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+            # Checks for sequence flags
+            elif "PORT " in command.upper():
+                if USER_executed == False or PASS_executed == False:
+                    sys.stdout.write("530 Not logged in.\r\n")
+                    connect_server.send("530 Not logged in.\r\n".encode())
+                elif USER_executed == True and PASS_executed == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+                    connect_server.send("503 Bad sequence of commands.\r\n".encode())
+
+            elif "RETR " in command.upper() and new_PORT == True:
+                connect_fail = False
+                splt_line = command.split(" ", 1)
+                path_name = splt_line[1]
+                error = 0
+                if ord(path_name[-2]) != 13 or ord(path_name[-1]) != 10:
+                    sys.stdout.write("501 Syntax error in parameter.\r\n")
+                    connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                for x in path_name:
+                    c_num = ord(x)
+                    if c_num > 127:
+                        sys.stdout.write("501 Syntax error in parameter.\r\n")
+                        connect_server.send("501 Syntax error in parameter.\r\n".encode())
+                        error = 1
+                        break
+                # Gets rid of / or \ before file name
+                if error != 1:
+
+
+                    RETR_count = RETR_count + 1
+                    if path_name[0] == "/" or ord(path_name[0]) == 47:
+                        path_name = path_name[1:]
+                    directory = "retr_files"
+                    # Checks for directory if none it creates one
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+                    #file_name = "file"+ str(RETR_count)
+                    dest_name = "retr_files/file" + str(RETR_count)
+                    # checks for file existence
+                    if os.path.exists(path_name[:-2]):
+                        shutil.copyfile(path_name[:-2], dest_name)
+                        sys.stdout.write("150 File status okay.\r\n")
+                        connect_server.send("150 File status okay.\r\n".encode())
+
+                        try:
+                            welcome_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            welcome_socket.connect((Final_Host, Final_Port))
+                        except:
+                            sys.stdout.write("425 Can not open data connection.\r\n")
+                            connect_server.send("425 Can not open data connection.\r\n".encode())
+                            connect_fail = True
+
+                        #Sending file
+                        if connect_fail is False:
+                            file = open(path_name[:-2],'rb')
+                            #send_file = file.read()
+
+                            #while send_file:
+                            #print("sending file")
+                            welcome_socket.sendfile(file)
+                            #print("sent")
+                            file.close()
+
+                            sys.stdout.write("250 Requested file action completed.\r\n")
+                            connect_server.send("250 Requested file action completed.\r\n".encode())
+                            welcome_socket.close()
+                            new_PORT = False
+                    else:
+                        sys.stdout.write("550 File not found or access denied.\r\n")
+                        connect_server.send("550 File not found or access denied.\r\n".encode())
+            # Checks for sequence flags
+            elif "RETR " in command.upper():
+                if USER_executed == False or PASS_executed == False:
+                    sys.stdout.write("530 Not logged in.\r\n")
+                    connect_server.send("530 Not logged in.\r\n".encode())
+                elif USER_executed == True and PASS_executed == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+                    connect_server.send("503 Bad sequence of commands.\r\n".encode())
+                if new_PORT == False:
+                    sys.stdout.write("503 Bad sequence of commands.\r\n")
+                    connect_server.send("503 Bad sequence of commands.\r\n".encode())
+
+                # If no correct command found than the command is incorrect
+            else:
+                sys.stdout.write("500 Syntax error, command unrecognized.\r\n")
+                connect_server.send("500 syntax error, command unrecognized.\r\n".encode())
