@@ -1,0 +1,210 @@
+import sys
+import socket
+import re
+
+Connect_call = False
+working_connection = False
+increment=0
+file_num = 0
+file = sys.stdin.read().splitlines(keepends = True)
+
+def replycheck(reply):
+    error = False
+    splt_lines = reply.split(" ", 1)
+
+    reply_code = splt_lines[0]
+
+    if re.match('^[1-5][0-9][0-9]', reply_code) is None:
+        print("ERROR -- reply-code")
+        error = True
+    else:
+        if len(reply_code) != 3:
+            print("ERROR -- reply-code")
+            error = True
+
+    if len(splt_lines) == 2:
+        reply_text = splt_lines[1]
+    else:
+        if error is False:
+            print('ERROR -- reply-text')
+            error = True
+            #break
+
+    for x in reply_text:
+        c_num = ord(x)
+        if c_num > 127:
+            print("ERROR -- reply-text")
+            error = True
+            break
+
+    if error is False:
+        if ord(reply_text[-1]) == 10 and ord(reply_text[-2]) == 13:
+            print("FTP reply " + reply_code + " accepted. " + "Text is: " + reply_text.rstrip("\r\n"))
+        else:
+            error = True
+            print("ERROR -- <CRLF>")
+
+for inp_line in file:
+    sys.stdout.write(inp_line)
+
+    # Checks for Connect client
+    if "CONNECT " in inp_line:
+        splt_line = inp_line.split(" ")
+        increment = 0
+        error = 0
+
+        if len(splt_line) == 1:
+            print("ERROR -- server-host")
+            error += 1
+            break
+        else:
+            server_host = splt_line[1]
+            if "." not in server_host:
+                if re.match('^[a-zA-Z]+[a-zA-Z0-9]+$', server_host) is None:
+                    error = 1
+                    print("ERROR -- server-host")
+
+            else:
+                server_strings = server_host.split(".")
+                for i in range(len(server_strings)):
+                    strings = server_strings[i]
+                    if re.match('^[a-zA-Z]+[a-zA-Z0-9]+$', strings) is None:
+                        error = 1
+                        print("ERROR -- server-host")
+                        break
+        if len(splt_line) == 2 or len(splt_line) > 3:
+            if error == 0:
+                print("ERROR -- server-port")
+                error += 1
+
+        else:
+            server_port = splt_line[2]
+
+            if int(server_port) < 0 or int(server_port) > 65535:
+                print("ERROR -- server-port")
+                error = 1
+
+            elif len(server_port) > 1:
+                if re.match("^[0]", server_port) is not None:
+                    print("ERROR -- server-port")
+                    error = 1
+
+            if error == 0:
+                Connect_call = True
+
+                # Establish TCP connection
+                # MAKE TRY BLOCK TO CHECK
+                #print(server_host)
+                server_port = server_port.rstrip("\r" + "\n")
+                #print(server_port)
+
+                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    sys.stdout.write(
+                        "CONNECT accepted for FTP server at host " + server_host + " and port " + server_port +"\r\n")
+                    client_socket.connect((server_host, int(server_port)))
+                    working_connection = True
+                except:
+                    print("CONNECT failed")
+
+            if working_connection is True:
+                received_reply = client_socket.recv(4096).decode()
+                replycheck(received_reply)
+                commands = ["USER anonymous\r\n", "PASS guest@\r\n", "SYST\r\n", "TYPE I\r\n"]
+                for command in commands:
+                    sys.stdout.write(command)
+                    client_socket.send(command.encode())
+                    received_reply = client_socket.recv(4096).decode()
+                    replycheck(received_reply)
+    elif "GET " in inp_line:
+        if Connect_call is True and working_connection is True:
+            Get_Fail = False
+
+            splt_line = inp_line.split(" ", 1)
+            path_name = splt_line[1]
+            error = 0
+            my_ip = socket.gethostbyname(socket.gethostname())
+            host_address = my_ip.replace(".", ",")
+
+            port_number = int(sys.argv[1]) + increment
+            second_number = port_number % 256
+            first_number = port_number // 256
+            for x in path_name:
+                c_num = ord(x)
+                if c_num > 127:
+                    print("ERROR -- pathname")
+                    error = 1
+                    break
+            if error == 0:
+                print("GET accepted for " + path_name.rstrip("\r" + "\n"))
+
+
+                #Create Welcome Port
+                try:
+                    ip = socket.gethostbyname(socket.gethostname()).replace(',', '.')
+                    new_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                    new_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    new_socket.bind((ip, port_number))
+                    # print("socket bound to"+ sys.argv[1])
+                    new_socket.listen(1)  # Allow only one connection at a time
+                    # print("listening")
+                except:
+                    sys.stdout.write("GET failed, FTP-data port not allocated.\r\n")
+                    Get_Fail = True
+
+                if Get_Fail is False:
+                    send_port = "PORT " + host_address + "," + str(first_number) + "," + str(second_number) + "\r\n"
+                    sys.stdout.write(send_port)
+                    client_socket.send(send_port.encode())
+                    port_response = client_socket.recv(4096).decode()
+                    replycheck(port_response)
+                    increment = increment+1
+
+                    send_retr = "RETR " + path_name.rstrip("\r" + "\n") + "\r\n"
+
+                    sys.stdout.write(send_retr)
+                    client_socket.send(send_retr.encode())
+
+                    retr_response = client_socket.recv(4096).decode()
+                    replycheck(retr_response)
+                    #print(retr_response[:3])
+
+                    if retr_response[:3]== "150":
+                        # only accept if file found
+                        file_num = file_num + 1
+                        try:
+                            (welcome_socket, addr) = new_socket.accept()
+                            #print("accepted")
+                        except:
+                            print("Not accepted")
+
+                        # Receive File
+                        recv_file = open('retr_files/file'+str(file_num), 'w+b')
+
+                        recv_data = welcome_socket.recv(4096).decode()
+                        while recv_data:
+                            recv_file.write(recv_data)
+                            recv_data = welcome_socket.recv(4096).decode()
+                        #print("received")
+                        recv_file.close()
+                        welcome_socket.close()
+                        action_reply= client_socket.recv(4096).decode()
+                        replycheck(action_reply)
+        else:
+            print("ERROR -- expecting CONNECT")
+    elif "QUIT" in inp_line:
+        if Connect_call is False or working_connection is False:
+            print("ERROR -- expecting CONNECT")
+        else:
+            print("QUIT accepted, terminating FTP client")
+            sys.stdout.write("QUIT\r\n")
+            client_socket.send("QUIT\r\n".encode())
+            goodbye =client_socket.recv(4096).decode()
+            replycheck(goodbye)
+            Connect_call = False
+            client_socket.close()
+            break
+    else:
+        print("ERROR -- request")
+
